@@ -5,43 +5,58 @@ import {
   TouchableOpacity, 
   Text, 
   ActivityIndicator,
-  Modal,
-  Image,
-  Alert
+  SafeAreaView
 } from 'react-native';
 import { Camera } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialIcons } from '@expo/vector-icons';
 import { processImage } from '../utils/ocrHelper';
+import * as Device from 'expo-device';
 
 const CameraView = ({ onImageCaptured, onCancel }) => {
   const [hasPermission, setHasPermission] = useState(null);
-  const [type, setType] = useState(Camera.Constants.Type.back);
+  const [cameraType, setCameraType] = useState(undefined);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [capturedImage, setCapturedImage] = useState(null);
-  const [flash, setFlash] = useState(Camera.Constants.FlashMode.off);
   const cameraRef = useRef(null);
 
+  // Initialize camera safely
   useEffect(() => {
-    (async () => {
-      const { status } = await Camera.requestCameraPermissionsAsync();
-      setHasPermission(status === 'granted');
-    })();
+    const initializeCamera = async () => {
+      try {
+        // Request camera permissions
+        const { status } = await Camera.requestCameraPermissionsAsync();
+        setHasPermission(status === 'granted');
+        
+        // Safely access Camera constants
+        if (Camera && Camera.Constants && Camera.Constants.Type) {
+          setCameraType(Camera.Constants.Type.back);
+        } else {
+          console.log('Camera.Constants.Type is not available');
+        }
+      } catch (error) {
+        console.error('Error initializing camera:', error);
+        setHasPermission(false);
+      }
+    };
+    
+    initializeCamera();
   }, []);
 
   const takePicture = async () => {
     if (cameraRef.current) {
+      setIsProcessing(true);
       try {
-        const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 });
-        setCapturedImage(photo.uri);
+        const photo = await cameraRef.current.takePictureAsync();
+        processAndReturn(photo.uri);
       } catch (error) {
         console.error('Error taking picture:', error);
-        Alert.alert('Error', 'Failed to take picture. Please try again.');
+        setIsProcessing(false);
       }
     }
   };
 
   const pickImage = async () => {
+    setIsProcessing(true);
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -50,108 +65,77 @@ const CameraView = ({ onImageCaptured, onCancel }) => {
       });
 
       if (!result.canceled) {
-        setCapturedImage(result.assets[0].uri);
+        processAndReturn(result.assets[0].uri);
+      } else {
+        setIsProcessing(false);
       }
     } catch (error) {
       console.error('Error picking image:', error);
-      Alert.alert('Error', 'Failed to pick image from gallery. Please try again.');
+      setIsProcessing(false);
     }
   };
 
-  const processAndSubmit = async () => {
-    if (capturedImage) {
-      setIsProcessing(true);
-      try {
-        const extractedData = await processImage(capturedImage);
-        onImageCaptured(capturedImage, extractedData);
-      } catch (error) {
-        console.error('Error processing image:', error);
-        // Even if OCR fails, we want to allow manual entry
-        onImageCaptured(capturedImage, { name: '', company: '', expiryDate: '' });
-      } finally {
-        setIsProcessing(false);
-      }
+  const processAndReturn = async (imageUri) => {
+    try {
+      const extractedData = await processImage(imageUri);
+      onImageCaptured(imageUri, extractedData);
+    } catch (error) {
+      console.error('Error processing image:', error);
+      // Even if OCR fails, we want to allow manual entry
+      onImageCaptured(imageUri, { name: '', company: '', expiryDate: '' });
     }
   };
 
-  const toggleFlash = () => {
-    setFlash(
-      flash === Camera.Constants.FlashMode.off
-        ? Camera.Constants.FlashMode.on
-        : Camera.Constants.FlashMode.off
+  // Display loading if permission or camera type are not yet determined
+  if (hasPermission === null || cameraType === undefined) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2196F3" />
+        <Text style={styles.loadingText}>Loading camera...</Text>
+      </View>
     );
-  };
-
-  const retakePicture = () => {
-    setCapturedImage(null);
-  };
-
-  if (hasPermission === null) {
-    return <View />;
   }
   
   if (hasPermission === false) {
     return (
-      <View style={styles.permissionContainer}>
+      <SafeAreaView style={styles.permissionContainer}>
         <Text style={styles.permissionText}>No access to camera</Text>
-        <TouchableOpacity style={styles.permissionButton} onPress={onCancel}>
-          <Text style={styles.permissionButtonText}>Go Back</Text>
+        <TouchableOpacity 
+          style={styles.galleryOnlyButton}
+          onPress={pickImage}>
+          <Text style={styles.galleryOnlyButtonText}>Select from Gallery</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.galleryButton} onPress={pickImage}>
-          <Text style={styles.permissionButtonText}>Select from Gallery</Text>
+        <TouchableOpacity 
+          style={[styles.galleryOnlyButton, styles.cancelButton]}
+          onPress={onCancel}>
+          <Text style={styles.galleryOnlyButtonText}>Cancel</Text>
         </TouchableOpacity>
-      </View>
-    );
-  }
-
-  if (isProcessing) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#2196F3" />
-        <Text style={styles.loadingText}>Processing image...</Text>
-      </View>
+      </SafeAreaView>
     );
   }
 
   return (
     <View style={styles.container}>
-      {capturedImage ? (
-        <View style={styles.previewContainer}>
-          <Image source={{ uri: capturedImage }} style={styles.previewImage} />
-          <View style={styles.previewButtons}>
-            <TouchableOpacity style={styles.button} onPress={retakePicture}>
-              <MaterialIcons name="replay" size={24} color="white" />
-              <Text style={styles.buttonText}>Retake</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.button, styles.useButton]} onPress={processAndSubmit}>
-              <MaterialIcons name="check" size={24} color="white" />
-              <Text style={styles.buttonText}>Use Photo</Text>
-            </TouchableOpacity>
-          </View>
+      {isProcessing ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2196F3" />
+          <Text style={styles.loadingText}>Processing image...</Text>
         </View>
       ) : (
         <>
-          <Camera 
-            style={styles.camera} 
-            type={type} 
-            ref={cameraRef}
-            flashMode={flash}
-          >
-            <View style={styles.topButtonsContainer}>
-              <TouchableOpacity style={styles.topButton} onPress={onCancel}>
-                <MaterialIcons name="close" size={28} color="white" />
+          <Camera style={styles.camera} type={cameraType} ref={cameraRef}>
+            <SafeAreaView style={styles.headerContainer}>
+              <TouchableOpacity 
+                style={styles.closeButton} 
+                onPress={onCancel}
+              >
+                <MaterialIcons name="close" size={24} color="white" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.topButton} onPress={toggleFlash}>
-                <MaterialIcons 
-                  name={flash === Camera.Constants.FlashMode.on ? "flash-on" : "flash-off"} 
-                  size={28} 
-                  color="white" 
-                />
-              </TouchableOpacity>
-            </View>
-            <View style={styles.bottomButtonsContainer}>
+            </SafeAreaView>
+            
+            <View style={styles.buttonContainer}>
               <TouchableOpacity
-                style={styles.galleryButtonCamera}
+                style={styles.galleryButton}
                 onPress={pickImage}
               >
                 <MaterialIcons name="photo-library" size={28} color="white" />
@@ -167,11 +151,13 @@ const CameraView = ({ onImageCaptured, onCancel }) => {
               <TouchableOpacity
                 style={styles.flipButton}
                 onPress={() => {
-                  setType(
-                    type === Camera.Constants.Type.back
-                      ? Camera.Constants.Type.front
-                      : Camera.Constants.Type.back
-                  );
+                  if (Camera && Camera.Constants && Camera.Constants.Type) {
+                    setCameraType(
+                      cameraType === Camera.Constants.Type.back
+                        ? Camera.Constants.Type.front
+                        : Camera.Constants.Type.back
+                    );
+                  }
                 }}
               >
                 <MaterialIcons name="flip-camera-android" size={28} color="white" />
@@ -191,15 +177,15 @@ const styles = StyleSheet.create({
   camera: {
     flex: 1,
   },
-  topButtonsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    padding: 20,
+  headerContainer: {
+    paddingHorizontal: 15,
+    paddingTop: 10,
   },
-  topButton: {
-    padding: 10,
+  closeButton: {
+    alignSelf: 'flex-start',
+    padding: 8,
   },
-  bottomButtonsContainer: {
+  buttonContainer: {
     flex: 1,
     backgroundColor: 'transparent',
     flexDirection: 'row',
@@ -225,7 +211,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     marginRight: 20,
   },
-  galleryButtonCamera: {
+  galleryButton: {
     alignSelf: 'flex-end',
     marginLeft: 20,
   },
@@ -233,42 +219,10 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
   },
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-  },
-  previewContainer: {
-    flex: 1,
-    backgroundColor: 'black',
-  },
-  previewImage: {
-    flex: 1,
-    resizeMode: 'contain',
-  },
-  previewButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    padding: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-  },
-  button: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#555',
-    borderRadius: 8,
-    padding: 12,
-    paddingHorizontal: 20,
-  },
-  useButton: {
-    backgroundColor: '#2196F3',
-  },
-  buttonText: {
-    color: 'white',
-    fontSize: 16,
-    marginLeft: 8,
   },
   permissionContainer: {
     flex: 1,
@@ -281,23 +235,22 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     textAlign: 'center',
   },
-  permissionButton: {
+  galleryOnlyButton: {
     backgroundColor: '#2196F3',
-    padding: 15,
+    padding: 12,
     borderRadius: 8,
-    marginTop: 20,
+    marginVertical: 8,
+    width: 200,
+    alignItems: 'center',
   },
-  galleryButton: {
-    backgroundColor: '#4CAF50',
-    padding: 15,
-    borderRadius: 8,
-    marginTop: 20,
-  },
-  permissionButtonText: {
+  galleryOnlyButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
   },
+  cancelButton: {
+    backgroundColor: '#FF5252',
+  }
 });
 
 export default CameraView;

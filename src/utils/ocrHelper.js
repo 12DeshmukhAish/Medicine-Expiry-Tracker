@@ -1,11 +1,26 @@
-import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
-import * as ImageManipulator from 'expo-image-manipulator';
-import { OCR_API_KEY } from '@env'; // You'll need to add your own API key in .env file
+// Temporarily comment out problematic imports
+// import * as FileSystem from 'expo-file-system';
+// import * as ImageManipulator from 'expo-image-manipulator';
+// import { OCR_API_KEY } from '@env';
+
+// Hardcode API key temporarily (remember to remove this before committing code)
+// const OCR_API_KEY = 'your-api-key-here'; 
 
 // Uses OCR API to extract medicine information from an image
 export const processImage = async (imageUri) => {
   try {
+    // Temporarily return mock data while dependencies are being fixed
+    console.log('OCR process requested for image:', imageUri);
+    
+    // Return mock data for now
+    return {
+      name: 'Sample Medicine',
+      company: 'Pharma Company',
+      expiryDate: '05/2026'
+    };
+    
+    /* Original code commented out
     // Resize the image to improve OCR accuracy and reduce upload size
     const manipResult = await ImageManipulator.manipulateAsync(
       imageUri,
@@ -19,7 +34,6 @@ export const processImage = async (imageUri) => {
     });
     
     // Use Google Cloud Vision API for OCR
-    // You'll need to set up your own API key
     const apiUrl = `https://vision.googleapis.com/v1/images:annotate?key=${OCR_API_KEY}`;
     
     const requestBody = {
@@ -55,6 +69,7 @@ export const processImage = async (imageUri) => {
     } else {
       throw new Error('No text found in image');
     }
+    */
   } catch (error) {
     console.error('OCR processing error:', error);
     throw error;

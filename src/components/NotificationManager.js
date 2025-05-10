@@ -7,23 +7,39 @@ import { parseMonthYearDate } from '../utils/dateUtils';
 // Storage key for notification IDs
 const NOTIFICATION_IDS_KEY = 'medicine_notification_ids';
 
-// Configure default notification behavior
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+// Ensure notifications are only initialized on physical devices
+const initializeNotifications = () => {
+  // Only run this setup on an actual device to avoid the error
+  if (Device.isDevice) {
+    // Configure default notification handler for local notifications only
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+  }
+};
+
+// Initialize notifications safely
+try {
+  initializeNotifications();
+} catch (error) {
+  console.log('Notification initialization failed, likely running in Expo Go:', error);
+}
 
 /**
- * Register for push notifications
- * @returns {Promise<string|null>} - Notification token or null if not available
+ * Request local notification permissions
+ * @returns {Promise<boolean>} - Whether permissions were granted
  */
-export const registerForPushNotificationsAsync = async () => {
-  let token;
-  
-  if (Device.isDevice) {
+export const requestNotificationPermissions = async () => {
+  try {
+    if (!Device.isDevice) {
+      console.log('Must use physical device for notifications');
+      return false;
+    }
+    
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
     
@@ -33,36 +49,43 @@ export const registerForPushNotificationsAsync = async () => {
     }
     
     if (finalStatus !== 'granted') {
-      console.log('Failed to get push token for notification!');
-      return null;
+      console.log('Failed to get permission for notifications');
+      return false;
     }
-    
-    token = (await Notifications.getExpoPushTokenAsync()).data;
-  } else {
-    console.log('Must use physical device for Push Notifications');
-  }
 
-  if (Platform.OS === 'android') {
-    Notifications.setNotificationChannelAsync('medicine-expiry', {
-      name: 'Medicine Expiry Notifications',
-      importance: Notifications.AndroidImportance.MAX,
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#FF231F7C',
-    });
-  }
+    if (Platform.OS === 'android') {
+      try {
+        await Notifications.setNotificationChannelAsync('medicine-expiry', {
+          name: 'Medicine Expiry Notifications',
+          importance: Notifications.AndroidImportance.MAX,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#FF231F7C',
+        });
+      } catch (channelError) {
+        console.log('Error setting up notification channel:', channelError);
+        // Continue even if channel setup fails
+      }
+    }
 
-  return token;
+    return true;
+  } catch (error) {
+    console.log('Error requesting notification permissions:', error);
+    return false;
+  }
 };
 
 /**
- * Schedule a notification for medicine expiry
+ * Schedule a notification for medicine expiry (local notification only)
  * @param {Object} medicine - Medicine object
- * @returns {Promise<string>} - Notification ID
+ * @returns {Promise<string|null>} - Notification ID or null if scheduling failed
  */
 export const scheduleMedicineExpiryNotification = async (medicine) => {
   try {
-    if (!medicine.expiryDate) {
-      console.log('No expiry date for medicine, skipping notification');
+    // Skip if no expiry date or not on a physical device
+    if (!medicine.expiryDate || !Device.isDevice) {
+      console.log(!medicine.expiryDate 
+        ? 'No expiry date for medicine, skipping notification' 
+        : 'Not on a physical device, skipping notification');
       return null;
     }
     
@@ -83,22 +106,35 @@ export const scheduleMedicineExpiryNotification = async (medicine) => {
       return null;
     }
     
-    // Schedule the notification
-    const notificationId = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: 'Medicine Expiring Soon',
-        body: `${medicine.name} is expiring next month (${medicine.expiryDate})`,
-        data: { medicineId: medicine.id },
-      },
-      trigger: notificationDate,
-    });
+    // Request permissions first
+    const permissionGranted = await requestNotificationPermissions();
+    if (!permissionGranted) {
+      return null;
+    }
     
-    // Store the notification ID with the medicine ID
-    await saveNotificationId(medicine.id, notificationId);
-    
-    return notificationId;
+    try {
+      // Schedule the LOCAL notification
+      const notificationId = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Medicine Expiring Soon',
+          body: `${medicine.name} is expiring next month (${medicine.expiryDate})`,
+          data: { medicineId: medicine.id },
+        },
+        trigger: {
+          date: notificationDate,
+        },
+      });
+      
+      // Store the notification ID with the medicine ID
+      await saveNotificationId(medicine.id, notificationId);
+      
+      return notificationId;
+    } catch (scheduleError) {
+      console.error('Error scheduling notification:', scheduleError);
+      return null;
+    }
   } catch (error) {
-    console.error('Error scheduling notification:', error);
+    console.error('Error in scheduleMedicineExpiryNotification:', error);
     return null;
   }
 };
@@ -110,6 +146,11 @@ export const scheduleMedicineExpiryNotification = async (medicine) => {
  */
 export const cancelMedicineNotification = async (medicineId) => {
   try {
+    // Skip if not on a physical device
+    if (!Device.isDevice) {
+      return;
+    }
+    
     const notificationIds = await getNotificationIds();
     
     if (notificationIds[medicineId]) {
@@ -161,11 +202,21 @@ const saveNotificationId = async (medicineId, notificationId) => {
  */
 export const updateAllNotifications = async (medicines) => {
   try {
+    // Skip if not on a physical device
+    if (!Device.isDevice) {
+      console.log('Skipping notification updates on non-physical device');
+      return;
+    }
+    
     // Cancel all existing notifications
     const notificationIds = await getNotificationIds();
     
     for (const notificationId of Object.values(notificationIds)) {
-      await Notifications.cancelScheduledNotificationAsync(notificationId);
+      try {
+        await Notifications.cancelScheduledNotificationAsync(notificationId);
+      } catch (cancelError) {
+        console.log(`Error canceling notification ${notificationId}:`, cancelError);
+      }
     }
     
     // Clear notification IDs storage
@@ -180,8 +231,9 @@ export const updateAllNotifications = async (medicines) => {
   }
 };
 
+// Export all necessary functions
 export default {
-  registerForPushNotificationsAsync,
+  requestNotificationPermissions,
   scheduleMedicineExpiryNotification,
   cancelMedicineNotification,
   updateAllNotifications,

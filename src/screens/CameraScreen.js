@@ -1,21 +1,43 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Text, ActivityIndicator, Platform } from 'react-native';
 import { Camera } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialIcons } from '@expo/vector-icons';
 import { processImage } from '../utils/ocrHelper';
+import * as Device from 'expo-device';
 
 const CameraScreen = ({ navigation }) => {
   const [hasPermission, setHasPermission] = useState(null);
-  const [type, setType] = useState(Camera.Constants.Type.back);
+  const [cameraType, setCameraType] = useState(undefined);
   const [isProcessing, setIsProcessing] = useState(false);
   const cameraRef = useRef(null);
 
+  // Initialize camera safely
   useEffect(() => {
-    (async () => {
-      const { status } = await Camera.requestCameraPermissionsAsync();
-      setHasPermission(status === 'granted');
-    })();
+    const initializeCamera = async () => {
+      try {
+        // First check if we're on a physical device since simulators might cause issues
+        if (!Device.isDevice) {
+          console.log('Not a physical device, camera functionality may be limited');
+        }
+        
+        // Request camera permissions
+        const { status } = await Camera.requestCameraPermissionsAsync();
+        setHasPermission(status === 'granted');
+        
+        // Get camera types safely
+        if (Camera && Camera.Constants && Camera.Constants.Type) {
+          setCameraType(Camera.Constants.Type.back);
+        } else {
+          console.log('Camera.Constants.Type is not available');
+        }
+      } catch (error) {
+        console.error('Error initializing camera:', error);
+        setHasPermission(false);
+      }
+    };
+    
+    initializeCamera();
   }, []);
 
   const takePicture = async () => {
@@ -68,12 +90,39 @@ const CameraScreen = ({ navigation }) => {
     }
   };
 
-  if (hasPermission === null) {
-    return <View />;
+  const flipCamera = () => {
+    if (Camera && Camera.Constants && Camera.Constants.Type) {
+      setCameraType(
+        cameraType === Camera.Constants.Type.back
+          ? Camera.Constants.Type.front
+          : Camera.Constants.Type.back
+      );
+    } else {
+      console.log('Cannot flip camera: Camera.Constants.Type is not available');
+    }
+  };
+
+  // Display loading if permission or camera type are not yet determined
+  if (hasPermission === null || cameraType === undefined) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#2196F3" />
+        <Text style={styles.loadingText}>Loading camera...</Text>
+      </View>
+    );
   }
   
   if (hasPermission === false) {
-    return <Text>No access to camera</Text>;
+    return (
+      <View style={styles.permissionContainer}>
+        <Text style={styles.permissionText}>No access to camera</Text>
+        <TouchableOpacity 
+          style={styles.galleryOnlyButton}
+          onPress={pickImage}>
+          <Text style={styles.galleryOnlyButtonText}>Select from Gallery</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   return (
@@ -85,7 +134,7 @@ const CameraScreen = ({ navigation }) => {
         </View>
       ) : (
         <>
-          <Camera style={styles.camera} type={type} ref={cameraRef}>
+          <Camera style={styles.camera} type={cameraType} ref={cameraRef}>
             <View style={styles.buttonContainer}>
               <TouchableOpacity
                 style={styles.galleryButton}
@@ -103,13 +152,7 @@ const CameraScreen = ({ navigation }) => {
               
               <TouchableOpacity
                 style={styles.flipButton}
-                onPress={() => {
-                  setType(
-                    type === Camera.Constants.Type.back
-                      ? Camera.Constants.Type.front
-                      : Camera.Constants.Type.back
-                  );
-                }}
+                onPress={flipCamera}
               >
                 <MaterialIcons name="flip-camera-android" size={28} color="white" />
               </TouchableOpacity>
@@ -167,6 +210,27 @@ const styles = StyleSheet.create({
     marginTop: 10,
     fontSize: 16,
   },
+  permissionContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  permissionText: {
+    fontSize: 18,
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  galleryOnlyButton: {
+    backgroundColor: '#2196F3',
+    padding: 12,
+    borderRadius: 8,
+  },
+  galleryOnlyButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  }
 });
 
 export default CameraScreen;

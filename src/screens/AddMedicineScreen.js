@@ -14,6 +14,7 @@ import { saveMedicine } from '../utils/database';
 import MedicineForm from '../components/MedicineForm';
 import CameraView from '../components/CameraView';
 import { scheduleMedicineExpiryNotification } from '../components/NotificationManager';
+import * as Device from 'expo-device';
 
 const AddMedicineScreen = ({ navigation, route }) => {
   const [imageUri, setImageUri] = useState(null);
@@ -43,11 +44,18 @@ const AddMedicineScreen = ({ navigation, route }) => {
         imageUri
       });
       
-      // Schedule notification for this medicine
-      await scheduleMedicineExpiryNotification({
-        id: medicineId,
-        ...medicineData
-      });
+      // Only try to schedule notifications on physical devices
+      if (Device.isDevice) {
+        try {
+          await scheduleMedicineExpiryNotification({
+            id: medicineId,
+            ...medicineData
+          });
+        } catch (notificationError) {
+          console.log('Failed to schedule notification:', notificationError);
+          // Continue even if notification scheduling fails
+        }
+      }
       
       // Show success message
       Alert.alert(
